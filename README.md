@@ -1,18 +1,4 @@
-# TaxiAgent
-
-<div align="center">
-
-**一个面向网约车场景的多 Agent Spring Boot 项目**
-
-前置分类路由、领域 Agent 执行、工具调用循环、订单确认断点、多层记忆与多存储协同，全部落在真实代码里。
-
-![Java](https://img.shields.io/badge/Java-21-ff6b35)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.9-6db33f)
-![Spring AI](https://img.shields.io/badge/Spring%20AI-1.1.0-1677ff)
-![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.9-0052cc)
-![Multi-Agent](https://img.shields.io/badge/Agents-4-orange)
-
-</div>
+# RideGuard-Agent
 
 ## 项目简介
 
@@ -25,7 +11,7 @@
 - 订单链路在创建前强制进入用户确认阶段，避免“模型直接下单”
 - 对话与工具结果分别做了分层缓存和持久化，控制上下文长度，同时保留可恢复能力
 
-如果你想看一个 **更偏工程化的 Agent 应用**，这个项目的重点不在“会不会聊天”，而在：
+这个项目的重点不在“会不会聊天”，而在：
 
 - 怎样把 **路由、记忆、工具调用、业务状态** 串成稳定链路
 - 怎样让 Agent 在 **下单、查单、售后、知识库** 之间各司其职
