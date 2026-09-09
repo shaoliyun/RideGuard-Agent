@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -42,17 +43,20 @@ public class RagService {
     private final ElasticsearchClient esClient;
     private final QaInfoMapper qaInfoMapper;
     private final QaElasticMapMapper qaElasticMapMapper;
+    private final Executor ragTaskExecutor;
 
     private final SnowflakeIdWorker snowflakeIdWorker = new SnowflakeIdWorker(1, 1);
 
     public RagService(@Qualifier("openAiEmbeddingModel") EmbeddingModel embeddingModel,
                       ElasticsearchClient elasticsearchClient,
                       QaInfoMapper qaInfoMapper,
-                      QaElasticMapMapper qaElasticMapMapper) {
+                      QaElasticMapMapper qaElasticMapMapper,
+                      @Qualifier("ragTaskExecutor") Executor ragTaskExecutor) {
         this.embeddingModel = embeddingModel;
         this.esClient = elasticsearchClient;
         this.qaInfoMapper = qaInfoMapper;
         this.qaElasticMapMapper = qaElasticMapMapper;
+        this.ragTaskExecutor = ragTaskExecutor;
     }
 
     public PageResult<RagQAQueryVO> queryRagQA(RagQAQueryDTO dto) {
@@ -365,10 +369,10 @@ public class RagService {
             // 2. 并行执行两个查询 (Vector 和 BM25)
             // 使用 CompletableFuture 并行不仅快，而且解耦
             CompletableFuture<List<Hit<QaDocument>>> vectorFuture = CompletableFuture.supplyAsync(() ->
-                    searchVectorOnly(queryVector, WINDOW_SIZE)
+                    searchVectorOnly(queryVector, WINDOW_SIZE), ragTaskExecutor
             );
             CompletableFuture<List<Hit<QaDocument>>> bm25Future = CompletableFuture.supplyAsync(() ->
-                    searchBm25Only(userQuery, WINDOW_SIZE)
+                    searchBm25Only(userQuery, WINDOW_SIZE), ragTaskExecutor
             );
             // 3. 等待结果返回
             CompletableFuture.allOf(vectorFuture, bm25Future).join();

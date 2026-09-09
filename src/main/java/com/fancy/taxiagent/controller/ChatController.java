@@ -12,6 +12,7 @@ import com.fancy.taxiagent.security.UserTokenContext;
 import com.fancy.taxiagent.service.ChatService;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -22,7 +23,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 @RestController
 @RequestMapping("/chat/v2")
@@ -35,6 +36,9 @@ public class ChatController {
     private MessageMemory messageMemory;
     @Resource
     private MessageParser messageParser;
+    @Resource
+    @Qualifier("agentTaskExecutor")
+    private Executor agentTaskExecutor;
 
     @RequirePermission
     @PostMapping("/c/{id}")
@@ -42,7 +46,12 @@ public class ChatController {
         String userId = UserTokenContext.getUserIdInString();
         Sinks.Many<AgentEvent> sink = Sinks.many().unicast().onBackpressureBuffer();
         // 异步启动
-        CompletableFuture.runAsync(() -> chatService.chat(id, chatParam, sink, userId));
+        try {
+            agentTaskExecutor.execute(() -> chatService.chat(id, chatParam, sink, userId));
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            sink.tryEmitNext(AgentEvent.error("当前请求较多，请稍后重试"));
+            sink.tryEmitComplete();
+        }
         return sink.asFlux();
     }
 
@@ -52,7 +61,12 @@ public class ChatController {
         String userId = UserTokenContext.getUserIdInString();
         Sinks.Many<AgentEvent> sink = Sinks.many().unicast().onBackpressureBuffer();
         // 异步启动
-        CompletableFuture.runAsync(() -> chatService.resume(id, chatParam, sink, userId));
+        try {
+            agentTaskExecutor.execute(() -> chatService.resume(id, chatParam, sink, userId));
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            sink.tryEmitNext(AgentEvent.error("当前请求较多，请稍后重试"));
+            sink.tryEmitComplete();
+        }
         return sink.asFlux();
     }
 
