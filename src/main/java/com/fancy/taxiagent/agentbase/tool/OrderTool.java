@@ -3,6 +3,8 @@ package com.fancy.taxiagent.agentbase.tool;
 import com.fancy.taxiagent.constant.ToolContextKeyConstants;
 import com.fancy.taxiagent.agentbase.amap.service.AmapRouteService;
 import com.fancy.taxiagent.agentbase.chatinfo.ChatManager;
+import com.fancy.taxiagent.agentbase.workflow.OrderWorkflowService;
+import com.fancy.taxiagent.agentbase.workflow.OrderWorkflowState;
 import com.fancy.taxiagent.constant.RedisKeyConstants;
 import com.fancy.taxiagent.domain.dto.CreateOrderDTO;
 import com.fancy.taxiagent.domain.enums.OrderInfoEnum;
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +47,8 @@ public class OrderTool {
     private OrderRouteService orderRouteService;
     @Resource
     private ChatManager chatManager;
+    @Resource
+    private OrderWorkflowService orderWorkflowService;
 
     @Tool(description = "保存新订单相关参数")
     public String saveNewOrderParam(@ToolParam(description = "订单相关参数Map") OrderParams params,
@@ -163,6 +168,7 @@ public class OrderTool {
             redisPut(chatInfoKey, OrderInfoEnum.EST_PRICE.name(), estPrice.getEstPrice().toPlainString());
             redisDel(chatInfoKey, "ReadyforRoute");
             redisPut(chatInfoKey, "ReadyforConfirm", "true");
+            orderWorkflowService.markQuoted(chatId(toolContext));
             return String.format("新订单完成算价，预计里程%sKm，预计耗时%s分钟，预计价格%s元。请使用notifyUser()通知用户确认。",
                     redisGet(chatInfoKey, OrderInfoEnum.EST_DISTANCE_KM.name()),
                     TimeUtil.getMinutes(redisGet(chatInfoKey, "EST_TIME")), estPrice.getEstPrice());
@@ -183,6 +189,7 @@ public class OrderTool {
         // 最后在redis中放ReadyforConfirm:true的标记供HITL用户验证。
         redisDel(chatInfoKey, "ReadyforRoute");
         redisPut(chatInfoKey, "ReadyforConfirm", "true");
+        orderWorkflowService.markQuoted(chatId(toolContext));
 
         return String.format("新订单完成路径规划和算价，预计里程%sKm，预计全程耗时%s分钟，预计价格%s元。请使用notifyUser()通知用户确认。", estRoute.getEstKm(),
                 TimeUtil.getMinutes(estRoute.getEstTime()), estPrice.getEstPrice());
@@ -398,7 +405,13 @@ public class OrderTool {
     public String markOrderReadyForCreate(ToolContext toolContext) {
         log.info("[OrderTool]: markOrderReadyForCreate()");
         ToolNotifySupport.notifyToolListener(toolContext, "用户确认参数无误后，标记订单为可创建态 (markOrderReadyForCreate)");
-        String chatInfoKey = RedisKeyConstants.chatInfoKey(toolContext.getContext().get(ToolContextKeyConstants.CHAT_ID).toString());
+        String currentChatId = chatId(toolContext);
+        String chatInfoKey = RedisKeyConstants.chatInfoKey(currentChatId);
+        if (!orderWorkflowService.transition(currentChatId,
+                OrderWorkflowState.WAITING_CONFIRMATION, OrderWorkflowState.CREATING)) {
+            return "订单不在待确认状态，可能已被处理";
+        }
+        stringRedisTemplate.opsForHash().delete(chatInfoKey, "break");
         redisPut(chatInfoKey, "ReadyForCreate", "true");
         return "订单可创建，使用createOrder()创建";
     }
@@ -407,10 +420,22 @@ public class OrderTool {
     public String createOrder(ToolContext toolContext) {
         log.info("[OrderTool]: createOrder()");
         ToolNotifySupport.notifyToolListener(toolContext, "创建订单 (createOrder)");
-        String chatInfoKey = RedisKeyConstants.chatInfoKey(toolContext.getContext().get(ToolContextKeyConstants.CHAT_ID).toString());
+        String currentChatId = chatId(toolContext);
+        String chatInfoKey = RedisKeyConstants.chatInfoKey(currentChatId);
+        String existingOrderId = orderWorkflowService.createdOrderId(currentChatId);
+        if (existingOrderId != null) {
+            return "订单已创建，订单编号" + existingOrderId;
+        }
         if(redisGetObj(chatInfoKey, "ReadyForCreate") == null){
             return "订单非可创建态";
         }
+        String creationLockKey = "order:create:lock:" + currentChatId;
+        Boolean acquired = stringRedisTemplate.opsForValue()
+                .setIfAbsent(creationLockKey, "1", Duration.ofSeconds(30));
+        if (!Boolean.TRUE.equals(acquired)) {
+            return "订单正在创建，请勿重复提交";
+        }
+        try {
         CreateOrderDTO orderDTO = CreateOrderDTO.builder()
                 .userId(toolContext.getContext().get(ToolContextKeyConstants.USER_ID).toString())
                 .mongoTraceId(redisGet(chatInfoKey, OrderInfoEnum.MONGO_TRACE_ID.name()))
@@ -435,11 +460,22 @@ public class OrderTool {
         String estPriceStr = redisGet(chatInfoKey, OrderInfoEnum.EST_PRICE.name());
         chatManager.lockChat(toolContext.getContext().get(ToolContextKeyConstants.CHAT_ID).toString());
         redisPut(chatInfoKey, "OrderId", orderId);
+        orderWorkflowService.transition(currentChatId, OrderWorkflowState.CREATING, OrderWorkflowState.CREATED);
         return String.format("订单已创建，订单编号%s，预计里程%sKm，预计全程耗时%s分钟，预计价格%s元。本轮对话已锁定，引导用户后续需求新建对话。",
                 orderId,
                 estDistanceKm,
                 TimeUtil.getMinutes(estTimeSec),
                 estPriceStr);
+        } catch (RuntimeException ex) {
+            orderWorkflowService.transition(currentChatId, OrderWorkflowState.CREATING, OrderWorkflowState.FAILED);
+            throw ex;
+        } finally {
+            stringRedisTemplate.delete(creationLockKey);
+        }
+    }
+
+    private String chatId(ToolContext toolContext) {
+        return toolContext.getContext().get(ToolContextKeyConstants.CHAT_ID).toString();
     }
 
 
@@ -584,6 +620,5 @@ public class OrderTool {
                 .build();
     }
 }
-
 
 

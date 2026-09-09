@@ -3,6 +3,8 @@ package com.fancy.taxiagent.agents;
 import com.fancy.taxiagent.constant.ToolContextKeyConstants;
 import com.fancy.taxiagent.agentbase.memory.MessageMemory;
 import com.fancy.taxiagent.agentbase.tool.*;
+import com.fancy.taxiagent.agentbase.workflow.OrderWorkflowService;
+import com.fancy.taxiagent.agentbase.workflow.OrderWorkflowState;
 import com.fancy.taxiagent.config.AiModelProperties;
 import com.fancy.taxiagent.constant.RedisKeyConstants;
 import com.fancy.taxiagent.domain.dto.AgentEvent;
@@ -46,6 +48,7 @@ public class OrderAgent {
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final UserService userService;
+    private final OrderWorkflowService orderWorkflowService;
 
     // 工具注入
     private final OrderTool orderTool;
@@ -110,9 +113,6 @@ public class OrderAgent {
             sink.tryEmitComplete();
             return;
         }
-
-        // 删除 break 字段
-        stringRedisTemplate.opsForHash().delete(chatInfoKey, "break");
 
         // 获取历史消息
         List<Message> history = new ArrayList<>(messageMemory.get(userId, chatId, HISTORY_SIZE));
@@ -287,6 +287,13 @@ public class OrderAgent {
         try {
             String orderJson = objectMapper.writeValueAsString(orderParams);
 
+            if (!orderWorkflowService.transition(chatId,
+                    OrderWorkflowState.QUOTED, OrderWorkflowState.WAITING_CONFIRMATION)) {
+                sink.tryEmitNext(AgentEvent.error("订单状态已变化，请重新发起算价"));
+                sink.tryEmitComplete();
+                return;
+            }
+
             // 1. 发出 AgentEvent.confirm()
             sink.tryEmitNext(AgentEvent.comfirm(orderJson));
 
@@ -445,4 +452,3 @@ public class OrderAgent {
         }
     }
 }
-

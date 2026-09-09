@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: TaxiAgent
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: ${CHAT_MODEL:gpt-4.1-mini}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:text-embedding-3-small}
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/taxiagent?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${MYSQL_USERNAME:taxiagent}
+    password: ${MYSQL_PASSWORD}
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/taxiagent}
+  mail:
+    host: ${MAIL_HOST:smtp.example.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+
+amap:
+  url: ${AMAP_URL:https://restapi.amap.com/v3}
+  key: ${AMAP_API_KEY}
+  timeout: ${AMAP_TIMEOUT_MS:5000}
+
+qweather:
+  url: ${QWEATHER_URL}
+  key: ${QWEATHER_API_KEY}
+  token: ${QWEATHER_TOKEN:}
+  timeout: ${QWEATHER_TIMEOUT_MS:5000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+resilience4j:
+  retry:
+    instances:
+      readOnlyExternalApi:
+        max-attempts: 3
+        wait-duration: 200ms
+  circuitbreaker:
+    instances:
+      externalApi:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+
